@@ -1,0 +1,565 @@
+# SNNW method
+# Subspace Method Based on Neural Networks for Solving The Partial Differential Equation in Weak Form
+# Author: Pengyuan Liu; Xu zhaodong; Sheng zhiqiang
+# Case : Numerical example with 1D helmholtz equation
+
+
+import time
+from scipy.special import roots_legendre
+import torch
+import matplotlib.pyplot as plt
+import math
+import numpy as np
+from mpl_toolkits.mplot3d import Axes3D
+import torch.nn as nn
+import torch.nn.init as init
+from scipy.linalg import lstsq
+def quadrature_1d(N, dtype=torch.double, device='cpu'):
+    """
+    Quadrature points and weights for one-dimensional Gauss-Legendre quadrature rules in computational domain [-1,1].
+
+    Parameters:
+        N: number of quadrature points in domain [1-,1]
+        dtype, device
+    Returns:
+        X: quadrature points size([N])
+        W: quadrature weights size([N])
+    """
+    if N == 1:
+        coord = torch.tensor([[0, 2]], dtype=dtype, device=device)
+    elif N == 2:
+        coord = torch.tensor([[-np.sqrt(3) / 3, 1],
+                              [np.sqrt(3) / 3, 1]], dtype=dtype, device=device)
+    elif N == 3:
+        coord = torch.tensor([[-np.sqrt(15) / 5, 5 / 9],
+                              [0, 8 / 9],
+                              [np.sqrt(15) / 5, 5 / 9]], dtype=dtype, device=device)
+    elif N == 4:
+        coord = torch.tensor([[-np.sqrt((3 + 2 * np.sqrt(6 / 5)) / 7), (18 - np.sqrt(30)) / 36],
+                              [-np.sqrt((3 - 2 * np.sqrt(6 / 5)) / 7), (18 + np.sqrt(30)) / 36],
+                              [np.sqrt((3 - 2 * np.sqrt(6 / 5)) / 7), (18 + np.sqrt(30)) / 36],
+                              [np.sqrt((3 + 2 * np.sqrt(6 / 5)) / 7), (18 - np.sqrt(30)) / 36]], dtype=dtype,
+                             device=device)
+    elif N == 5:
+        coord = torch.tensor([[-1 / 3 * np.sqrt(5 + 2 * np.sqrt(10 / 7)), (322 - 13 * np.sqrt(70)) / 900],
+                              [- 1 / 3 * np.sqrt(5 - 2 * np.sqrt(10 / 7)), (322 + 13 * np.sqrt(70)) / 900],
+                              [0, 128 / 225],
+                              [1 / 3 * np.sqrt(5 - 2 * np.sqrt(10 / 7)), (322 + 13 * np.sqrt(70)) / 900],
+                              [1 / 3 * np.sqrt(5 + 2 * np.sqrt(10 / 7)), (322 - 13 * np.sqrt(70)) / 900]], dtype=dtype,
+                             device=device)
+    elif N == 6:
+        coord = torch.tensor([[-0.932469514203152, 0.171324492379170],
+                              [-0.661209386466264, 0.360761573048139],
+                              [-0.238619186083197, 0.467913934572691],
+                              [0.238619186083197, 0.467913934572691],
+                              [0.661209386466264, 0.360761573048139],
+                              [0.932469514203152, 0.171324492379170]], dtype=dtype, device=device)
+    elif N == 7:
+        coord = torch.tensor([[-0.949107912342758, 0.129484966168870],
+                              [-0.741531185599394, 0.279705391489277],
+                              [-0.405845151377397, 0.381830050505119],
+                              [0, 0.417959183673469],
+                              [0.405845151377397, 0.381830050505119],
+                              [0.741531185599394, 0.279705391489277],
+                              [0.949107912342758, 0.129484966168870]], dtype=dtype, device=device)
+    elif N == 8:
+        coord = torch.tensor([[-0.960289856497536, 0.101228536290377],
+                              [-0.796666477413627, 0.222381034453374],
+                              [-0.525532409916329, 0.313706645877887],
+                              [-0.183434642495650, 0.362683783378362],
+                              [0.183434642495650, 0.362683783378362],
+                              [0.525532409916329, 0.313706645877887],
+                              [0.796666477413627, 0.222381034453374],
+                              [0.960289856497536, 0.101228536290377]], dtype=dtype, device=device)
+    elif N == 9:
+        coord = torch.tensor([[-0.968160239507626, 0.0812743883615744],
+                              [-0.836031107326636, 0.180648160694858],
+                              [-0.613371432700590, 0.260610696402936],
+                              [-0.324253423403809, 0.312347077040003],
+                              [0.0, 0.330239355001260],
+                              [0.324253423403809, 0.312347077040003],
+                              [0.613371432700590, 0.260610696402936],
+                              [0.836031107326636, 0.180648160694858],
+                              [0.968160239507626, 0.0812743883615744]], dtype=dtype, device=device)
+    elif N == 10:
+        coord = torch.tensor([[-0.973906528517172, 0.0666713443086881],
+                              [-0.865063366688985, 0.149451349150581],
+                              [-0.679409568299024, 0.219086362515982],
+                              [-0.433395394129247, 0.269266719309997],
+                              [-0.148874338981631, 0.295524224714753],
+                              [0.148874338981631, 0.295524224714753],
+                              [0.433395394129247, 0.269266719309997],
+                              [0.679409568299024, 0.219086362515982],
+                              [0.865063366688985, 0.149451349150581],
+                              [0.973906528517172, 0.0666713443086881]], dtype=dtype, device=device)
+    elif N == 11:
+        coord = torch.tensor([[-0.978228658146057, 0.0556685671161737],
+                              [-0.887062599768095, 0.125580369464904],
+                              [-0.730152005574049, 0.186290210927734],
+                              [-0.519096129206812, 0.233193764591991],
+                              [-0.269543155952345, 0.262804544510247],
+                              [0.0, 0.272925086777901],
+                              [0.269543155952345, 0.262804544510247],
+                              [0.519096129206812, 0.233193764591991],
+                              [0.730152005574049, 0.186290210927734],
+                              [0.887062599768095, 0.125580369464904],
+                              [0.978228658146057, 0.0556685671161737]], dtype=dtype, device=device)
+    elif N == 12:
+        coord = torch.tensor([[-0.981560634246719, 0.0471753363865118],
+                              [-0.904117256370475, 0.106939325995318],
+                              [-0.769902674194305, 0.160078328543345],
+                              [-0.587317954286617, 0.203167426723066],
+                              [-0.367831498998180, 0.233492536538356],
+                              [-0.125233408511469, 0.249147045813403],
+                              [0.125233408511469, 0.249147045813403],
+                              [0.367831498998180, 0.233492536538356],
+                              [0.587317954286617, 0.203167426723066],
+                              [0.769902674194305, 0.160078328543345],
+                              [0.904117256370475, 0.106939325995318],
+                              [0.981560634246719, 0.0471753363865118]], dtype=dtype, device=device)
+    elif N == 13:
+        coord = torch.tensor([[-0.984183054718588, 0.0404840047653159],
+                              [-0.917598399222978, 0.0921214998377285],
+                              [-0.801578090733310, 0.138873510219789],
+                              [-0.642349339440340, 0.178145980761946],
+                              [-0.448492751036447, 0.207816047536889],
+                              [-0.230458315955135, 0.226283180262898],
+                              [0.0, 0.232551553230874],
+                              [0.230458315955135, 0.226283180262898],
+                              [0.448492751036447, 0.207816047536889],
+                              [0.642349339440340, 0.178145980761946],
+                              [0.801578090733310, 0.138873510219789],
+                              [0.917598399222978, 0.0921214998377285],
+                              [0.984183054718588, 0.0404840047653159]], dtype=dtype, device=device)
+    elif N == 14:
+        coord = torch.tensor([[-0.986283808696812, 0.0351194603317519],
+                              [-0.928434883663574, 0.0801580871597603],
+                              [-0.827201315069765, 0.121518570687902],
+                              [-0.687292904811685, 0.157203167158193],
+                              [-0.515248636358154, 0.185538397477937],
+                              [-0.319112368927890, 0.205198463721295],
+                              [-0.108054948707344, 0.215263853463158],
+                              [0.108054948707344, 0.215263853463158],
+                              [0.319112368927890, 0.205198463721295],
+                              [0.515248636358154, 0.185538397477937],
+                              [0.687292904811685, 0.157203167158193],
+                              [0.827201315069765, 0.121518570687902],
+                              [0.928434883663574, 0.0801580871597603],
+                              [0.986283808696812, 0.0351194603317519]], dtype=dtype, device=device)
+    elif N == 15:
+        coord = torch.tensor([[-0.987992518020485, 0.0307532419961174],
+                              [-0.937273392400706, 0.0703660474881081],
+                              [-0.848206583410427, 0.107159220467172],
+                              [-0.724417731360170, 0.139570677926155],
+                              [-0.570972172608539, 0.166269205816993],
+                              [-0.394151347077563, 0.186161000015562],
+                              [-0.201194093997435, 0.198431485327112],
+                              [0.0, 0.202578241925561],
+                              [0.201194093997435, 0.198431485327112],
+                              [0.394151347077563, 0.186161000015562],
+                              [0.570972172608539, 0.166269205816993],
+                              [0.724417731360170, 0.139570677926155],
+                              [0.848206583410427, 0.107159220467172],
+                              [0.937273392400706, 0.0703660474881081],
+                              [0.987992518020485, 0.0307532419961174]], dtype=dtype, device=device)
+    elif N == 16:
+        coord = torch.tensor([[-0.989400934991650, 0.0271524594117540],
+                              [-0.944575023073233, 0.0622535239386481],
+                              [-0.865631202387832, 0.0951585116824914],
+                              [-0.755404408355003, 0.124628971255535],
+                              [-0.617876244402644, 0.149595988816578],
+                              [-0.458016777657227, 0.169156519395002],
+                              [-0.281603550779259, 0.182603415044923],
+                              [-0.0950125098376374, 0.189450610455069],
+                              [0.0950125098376374, 0.189450610455069],
+                              [0.281603550779259, 0.182603415044923],
+                              [0.458016777657227, 0.169156519395002],
+                              [0.617876244402644, 0.149595988816578],
+                              [0.755404408355003, 0.124628971255535],
+                              [0.865631202387832, 0.0951585116824914],
+                              [0.944575023073233, 0.0622535239386481],
+                              [0.989400934991650, 0.0271524594117540]], dtype=dtype, device=device)
+    else:
+        raise ValueError('This quadrature scheme is not implemented now!')
+    return coord[:, 0], coord[:, 1]
+
+
+
+def composite_quadrature_1d(N, a, b, M, dtype=torch.double, device='cpu'):
+    h = (b - a) / M
+    x, w = quadrature_1d(N, dtype, device)
+    x = ((x + 1) / 2).repeat(M) * h + torch.linspace(a, b, M + 1, dtype=dtype, device=device)[:-1].repeat_interleave(N)
+    w = (w / 2).repeat(M) * h
+    return x, w
+
+def setup_seed(seed):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.set_default_tensor_type(torch.DoubleTensor)
+
+def shift_a_b(x_min, x_max, a, b, data):
+    data1 = a + (data - x_min) / (x_max - x_min) * (b - a)
+    return data1
+
+def exact(x):
+    return torch.sin(3 * torch.pi * x + 3 * torch.pi / 20) * torch.cos(2 * torch.pi * x + torch.pi / 10) + 2
+
+def ff(x):
+    x.requires_grad_(True)
+    return -1 * gradients(exact(x), x, 2) + lamb * exact(x) - lamb * confactor(x)
+
+def interior(n):
+    points, wi = P_guass(N_in, X_min, X_max, N_guass)
+    points = points.reshape([-1, 1])
+    x = torch.tensor(points, requires_grad=True).reshape([-1, 1])
+    cond = ff(x)
+    return x.requires_grad_(True), cond
+
+def left(n):
+    x = X_min * torch.ones(n, 1).double()
+    cond = exact(x)
+    return x.requires_grad_(True), cond
+
+def right(n):
+    x = X_max * torch.ones(n, 1).double()
+    cond = exact(x)
+    return x.requires_grad_(True), cond
+
+def confactor(x):
+    xl, leftl = left(N_b)
+    xr, rightr = right(N_b)
+    x = x.reshape([-1, 1])
+    with torch.no_grad():
+        result = torch.div(x - X_min, (x - X_min) + (X_max - x)) * rightr + torch.div(X_max - x, (x - X_min) + (X_max - x)) * leftl
+    result = result.reshape([-1, 1])
+    return result
+
+class Net(nn.Module):
+    def __init__(self, net_size, X_min, X_max):
+        super(Net, self).__init__()
+        a = 2 / (X_max - X_min)
+        b = -1 - 2 * X_min / (X_max - X_min)
+        self.normalize = NormalizeLayer(a, b)
+        layers = []
+        for i in range(len(net_size) - 1):
+            if i < len(net_size) - 2:
+                layers.append(nn.Linear(net_size[i], net_size[i + 1]).double())
+                layers.append(nn.Tanh())
+            else:
+                layers.append(nn.Linear(net_size[i], net_size[i + 1], bias=False).double())
+        self.net = nn.Sequential(*layers)
+
+    def forward(self, x, return_hidden_layer=False, return_test=True):
+        x_normalized = self.normalize(x)
+        last_activation_output = None
+        count = 0
+        xl, leftl = left(N_b)
+        xr, rightr = right(N_b)
+        for layer in self.net:
+            if count == k - 1:
+                if return_test:
+                    x_normalized = (x - X_min) * (X_max - x) * layer(x_normalized)
+                else:
+                    x_normalized = (x - X_min) * (X_max - x) * layer(x_normalized)
+            else:
+                x_normalized = layer(x_normalized)
+            count = count + 1
+            if isinstance(layer, nn.Tanh):
+                last_activation_output = x_normalized
+        if return_hidden_layer:
+            return last_activation_output
+        return x_normalized
+
+    def get_hidden_layer_output(self, x):
+        return self.forward(x, return_hidden_layer=True, return_test=True)
+
+    def get_test_output(self, x):
+        return self.forward(x, return_hidden_layer=True, return_test=False)
+
+def pre_define(net_size, X_min, X_max):
+    model = Net(net_size, X_min, X_max)
+    return model
+
+loss = nn.MSELoss()
+
+def gradients(u, x, order=1):
+    if order == 1:
+        return torch.autograd.grad(u, x, grad_outputs=torch.ones_like(u), create_graph=True, only_inputs=True)[0]
+    else:
+        return gradients(gradients(u, x), x, order=order - 1)
+
+def loss_interior(u, N_int):
+    x, f = interior(N_int)
+    u_in = u(x)
+    return loss(-gradients(u_in, x, 2) + lamb * u_in, f)
+
+def loss_interior_Ritz(u, N_int, weight):
+    x, f = interior(N_int)
+    x_left, _ = left(N_b)
+    x_right, _ = right(N_b)
+    u_in = u(x)
+    u_x = gradients(u_in, x, 1)
+    u = 0.5 * torch.sum(weight.reshape(-1, 1) * u_x * u_x + lamb * (weight.reshape(-1, 1) * u_in * u_in)) - torch.sum(weight.reshape(-1, 1) * u_in * f)
+    return u
+
+def loss_interior_Galerkin(u, N_int, weight, subspace_dim):
+    weight = torch.tensor(weight, requires_grad=True)
+    x, f = interior(N_int)
+    u_in = u(x)
+    u_x = gradients(u_in, x, 1)
+    out = u.get_hidden_layer_output(x)
+    grad1 = torch.tensor([])
+    for i in range(subspace_dim):
+        g1 = torch.autograd.grad(outputs=out[:, i], inputs=x, grad_outputs=torch.ones_like(out[:, i]), create_graph=True, retain_graph=True)[0]
+        grad1 = torch.cat([grad1, g1], dim=1)
+    grad1 = grad1.T
+    S1 = torch.mm(grad1, weight.reshape([-1, 1]) * u_x)
+    S3 = torch.mm(out.T, weight.reshape([-1, 1]) * f)
+    u = loss(torch.sum((S1) * (S1)), torch.sum(S3 * S3))
+    return u
+
+
+def loss_interior_Galerkin_strong(u, N_int, weight, subspace_dim):
+    x, f = interior(N_int)
+    u_in = u(x)
+    u_xx = gradients(u_in, x, 2)
+    u = DGMloss((-u_xx + lamb * u_in), f, weight)
+    return u
+
+def DGMloss(y_pred, y_true, w):
+    difference = y_true - y_pred
+    squared_diff = difference ** 2
+    weighted_squared_diff = squared_diff * w
+    weighted_mse = weighted_squared_diff.sum()
+    return weighted_mse
+
+def compute_gradients(out, point):
+    grad1 = []
+    grad2 = []
+    for i in range(subspace_dim):
+        g1 = torch.autograd.grad(outputs=out[:, i], inputs=point, grad_outputs=torch.ones_like(out[:, i]), create_graph=True, retain_graph=True)[0]
+        grad1.append(g1.squeeze().detach().numpy())
+        g2 = torch.autograd.grad(outputs=g1, inputs=point, grad_outputs=torch.ones_like(g1), create_graph=False, retain_graph=True if i < subspace_dim - 1 else False)[0]
+        grad2.append(g2.squeeze().detach().numpy())
+    grad1_np = np.array(grad1).T
+    grad2_np = np.array(grad2).T
+    return grad1_np, grad2_np
+
+class NormalizeLayer(nn.Module):
+    def __init__(self, a, b):
+        super(NormalizeLayer, self).__init__()
+        self.a = torch.tensor(a, dtype=torch.double)
+        self.b = torch.tensor(b, dtype=torch.double)
+
+    def forward(self, x):
+        return self.a * x + self.b
+
+
+class CustomSinActivation(nn.Module):
+    def __init__(self):
+        super(CustomSinActivation, self).__init__()
+
+    def forward(self, x):
+        return torch.sin(x * torch.pi)
+
+class CustomCosActivation(nn.Module):
+    def __init__(self):
+        super(CustomCosActivation, self).__init__()
+
+    def forward(self, x):
+        return torch.cos(x)
+
+def compute_error(net, exact_solution, x):
+    u_pred = net(x).detach().numpy() + confactor(x).detach().numpy()
+    u_exact = exact_solution(x).detach().numpy()
+    relative_l2_error = np.sqrt(np.sum((u_pred - u_exact) ** 2) / np.sum(u_exact ** 2))
+    max_error = np.max(np.abs(u_pred - u_exact))
+    return max_error, relative_l2_error
+
+def int_TRA(A, B, x_min, x_max, int_number, weight):
+    return np.dot(np.multiply(A, weight), B)
+
+def plot_solutions(net, exact_solution, x, filename_prefix="solution"):
+    u_pred = net(x).detach().numpy() + confactor(x).detach().numpy()
+    u_exact = exact_solution(x).detach().numpy()
+    error = np.abs(u_pred - u_exact)
+    plt.rcParams.update({"font.size": 16, "xtick.labelsize": 14, "ytick.labelsize": 14, "axes.labelsize": 18, "legend.fontsize": 14})
+    plt.figure(figsize=(8, 6))
+    plt.plot(x.numpy(), u_exact, label="Exact Solution", linewidth=2)
+    plt.plot(x.numpy(), u_pred, label="Numerical Solution", linestyle='--', linewidth=2)
+    plt.xlabel("x")
+    plt.ylabel("u(x)")
+    plt.legend()
+    plt.grid(True, linestyle='--', alpha=0.6)
+    plt.minorticks_on()
+    plt.tick_params(which='both', direction='in', top=True, right=True)
+    plt.tight_layout()
+    plt.savefig(f"{filename_prefix}_prediction_vs_exact.png", dpi=300, bbox_inches='tight')
+    plt.show()
+    plt.figure(figsize=(8, 6))
+    plt.plot(x.numpy(), error, color="blue", linewidth=2)
+    plt.xlabel("x")
+    plt.ylabel("Error")
+    plt.grid(True, linestyle='--', alpha=0.6)
+    plt.minorticks_on()
+    plt.tick_params(which='both', direction='in', top=True, right=True)
+    plt.tight_layout()
+    plt.savefig(f"{filename_prefix}_error.jpg", dpi=300, bbox_inches='tight')
+    plt.show()
+
+def P_guass(N, a, b, M):
+    h = (b - a) / M
+    x, w = roots_legendre(N)
+    x = torch.tensor(x)
+    x = ((x + 1) / 2).repeat(M) * h + torch.linspace(a, b, M + 1)[:-1].repeat_interleave(N)
+    w = (w / 2).repeat(M) * h
+    return x, w
+
+if __name__ == '__main__':
+    epochs = 10000000  # Maximum number of training epochs
+    epochs_L = 1000  # Number of epochs for local refinement (if used)
+    N_in = 10  # Number of interior points
+    N_guass = 100  # Number of Gaussian quadrature points
+    N_b = 1  # Number of boundary points
+    kappa = np.pi  # PDE parameter (pi)
+    lamb = 10  # Regularization / penalty parameter
+    X_min = 0.0  # Domain left boundary
+    X_max = 2.0  # Domain right boundary
+    subspace_dim = 300  # Dimension of the subspace
+    eL = 1e-03  # Error tolerance threshold
+    net_size = [1, 100, 100, 100, 100, subspace_dim, 1]  # Neural network architecture
+    k = 2 * (len(net_size) - 2)  # Index for subspace layer
+
+    # Print training setup
+    print(
+        f"epochs = {epochs}\nN_in = {N_in}\nN_b = {N_b}\nlamb = {kappa}\nX_min = {X_min}\nX_max = {X_max}\nsubspace_dim = {subspace_dim}\neL = {eL}\nnet_size = {net_size}")
+
+    setup_seed(1)  # Fix random seed for reproducibility
+
+    # Generate quadrature points and weights
+    points, weight = composite_quadrature_1d(N_in, X_min, X_max, N_guass, dtype=torch.double, device='cpu')
+    points = points.reshape([-1, 1])
+    x_eval = torch.tensor(points).reshape([-1, 1])
+
+    # Generate interior points
+    points_interior, _ = interior(N_in)
+
+    # Define neural network
+    u = pre_define(net_size, X_min, X_max)
+    u = u.double()
+
+    # Optimizer
+    opt = torch.optim.Adam(params=u.parameters())
+    start_time_train = time.time()
+    break_step = 2000  # Step to stop training manually
+
+    # Training loop
+    for i in range(epochs):
+        opt.zero_grad()
+        l = loss_interior(u, N_in)  # Strong form (SNNWP)
+        # l = loss_interior_Ritz(u, N_in, weight)  # Weak Ritz form (SNNWR)
+        # l = loss_interior_Galerkin_strong(u, N_in, weight, subspace_dim)  # Galerkin form (SNNWG)
+
+        if i == 0:
+            flag = l * eL  # Adaptive tolerance flag
+        if l <= flag:
+        # if i == break_step:
+            print(f"Training of solution space stopped")
+            L_infty_error, l2_error = compute_error(u, exact, x_eval)
+            print(
+                f"Current Epoch: {i + 1}, Loss: {l.item()}, L_infty_error: {L_infty_error.item()}, relative_l2_error: {l2_error.item()}")
+            break
+        elif i == break_step:
+            print(f"Training of solution space stopped")
+            L_infty_error, l2_error = compute_error(u, exact, x_eval)
+            print(
+                f"Current Epoch: {i + 1}, Loss: {l.item()}, L_infty_error: {L_infty_error.item()}, relative_l2_error: {l2_error.item()}")
+            break
+
+        l.backward()
+
+        # Print results for the first epoch
+        if i + 1 == 1:
+            L_infty_error, l2_error = compute_error(u, exact, x_eval)
+            print(
+                f"Epoch: {i + 1}, Loss: {l.item()}, L_infty_error: {L_infty_error.item()}, relative_l2_error: {l2_error.item()}")
+
+        # Print every certain interval
+        if (i + 1) % (epochs / 100000) == 0 and i < epochs:
+            L_infty_error, l2_error = compute_error(u, exact, x_eval)
+            print(
+                f"Epoch: {i + 1}, Loss: {l.item()}, L_infty_error: {L_infty_error.item()}, relative_l2_error: {l2_error.item()}")
+
+        opt.step()
+
+    end_time_train = time.time()
+    print(
+        f"Current projection coordinate MSE: {torch.mean(torch.abs(u.net[k].weight)).item()}, Norm: {torch.sqrt(torch.sum(torch.pow(u.net[k].weight, 2))).item()}")
+    print(f"Training time of subspace basis: {end_time_train - start_time_train} seconds")
+
+    # Compute hidden layer outputs
+    out = u.get_hidden_layer_output(points_interior)
+    out_test = u.get_test_output(points_interior)
+
+    # Convert outputs to numpy
+    values = out.detach().numpy()
+    values_test = out_test.detach().numpy()
+
+    # Compute gradients of hidden layer outputs
+    start_time_compute = time.time()
+    grad1 = []
+    grad1_test = []
+    for i in range(subspace_dim):
+        g1 = torch.autograd.grad(outputs=out[:, i], inputs=points_interior,
+                                 grad_outputs=torch.ones_like(out[:, i]),
+                                 create_graph=True, retain_graph=True)[0]
+        grad1.append(g1.squeeze().detach().numpy())
+    for i in range(subspace_dim):
+        g1_test = torch.autograd.grad(outputs=out_test[:, i], inputs=points_interior,
+                                      grad_outputs=torch.ones_like(out_test[:, i]),
+                                      create_graph=True, retain_graph=True)[0]
+        grad1_test.append(g1_test.squeeze().detach().numpy())
+
+    grad1_np = np.array(grad1).T
+    grad1_test_np = np.array(grad1_test).T
+
+    # Compute right-hand side vector F
+    f_points = ff(points_interior)
+    f_points_value = f_points.detach().numpy()
+    temp = np.transpose(values_test)
+    temp1 = np.transpose(values)
+    F = int_TRA(temp, f_points_value, X_min, X_max, points_interior, weight)
+
+    # Assemble mass matrix M
+    M = np.zeros([subspace_dim, subspace_dim])
+    for m in range(subspace_dim):
+        for l in range(subspace_dim):
+            M[m, l] = int_TRA(temp1[m, :], temp[l, :], X_min, X_max, subspace_dim, weight)
+
+    # Assemble stiffness matrix K
+    K = np.zeros([subspace_dim, subspace_dim])
+    for m in range(subspace_dim):
+        for l in range(subspace_dim):
+            K[m, l] = int_TRA(grad1_np.T[m, :], grad1_test_np.T[l, :], X_min, X_max, subspace_dim, weight)
+
+    # Final system matrix
+    A = K + lamb * M
+    w = lstsq(A, F)[0]  # Solve linear system
+    w_tensor = torch.from_numpy(w).double()
+    w_tensor = w_tensor.view(1, -1)
+    u.net[k].weight = nn.Parameter(w_tensor)
+
+    # Compute final errors
+    L_infty_error, l2_error = compute_error(u, exact, x_eval)
+    end_time_compute = time.time()
+    print(f"Matrix generation and computation time: {end_time_compute - start_time_compute} seconds")
+    print(L_infty_error, l2_error)
+
+    # Update loss
+    l = loss_interior(u, N_in)
+    print(
+        f"Error updated -> Loss: {l.item()}, L_infty_error: {L_infty_error.item()}, relative_l2_error: {l2_error.item()}")
+
+    # Plot solutions
+    plot_solutions(u, exact, x_eval, filename_prefix="solution")
